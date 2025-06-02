@@ -149,5 +149,5 @@ TIKTOK_API_URL = "https://open.tiktokapis.com/v2/"
 TIKTOK_REDIRECT_URL = "https://73a2-129-208-125-202.ngrok-free.app/tiktok_success/"
 
 
-X_CONSUMER_ID = "tm27laQ6tFoNWXQMM4CUsEOjl"
-X_CONSUMER_SECRET = "eqOqhUq9tm66u8vx92ds4AQPG4JRAdyDUY0XWkkyBGt2AZ7I4f"
+X_CONSUMER_ID = "Your Id Here"
+X_CONSUMER_SECRET = "Your secret here"
