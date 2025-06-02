@@ -34,8 +34,23 @@ urlpatterns = [
         name="upload_on_tiktok",
     ),
     path(
+        "upload_linkedin_image/",
+        views.UploadImageToLinkedInView.as_view(),
+        name="upload_linkedin_image",
+    ),
+    path(
+        "upload_excell/",
+        views.CreateCSVFromExcell.as_view(),
+        name="upload_excell",
+    ),
+    path(
         "create_linkedin_post/",
         views.CreatePostLinkedIn.as_view(),
         name="post_creation",
+    ),
+    path(
+        "get_x_auth_url/",
+        views.TwitterRequestTokenView.as_view(),
+        name="get_x_auth_url",
     ),
 ]

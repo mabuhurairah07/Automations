@@ -28,10 +28,10 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
-CORS_ALLOWED_ORIGINS = [
-    "https://4049-188-52-243-222.ngrok-free.app",
-    "http://localhost:3000",
-]
+# CORS_ALLOWED_ORIGINS = [
+#     "https://4049-188-52-243-222.ngrok-free.app",
+#     "http://localhost:3000",
+# ]
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
@@ -139,11 +139,15 @@ LINKEDIN_CLIENT_ID = config("LINKEDIN_CLIENT_ID")
 LINKEDIN_CLIENT_SECRET = config("LINKEDIN_CLIENT_SECRET")
 LINKEDIN_BASE_URL = "https://www.linkedin.com/"
 LINKEDIN_API_URL = "https://api.linkedin.com/"
-LINKEDIN_REDIRECT_URL = "https://4049-188-52-243-222.ngrok-free.app/success"
+LINKEDIN_REDIRECT_URL = "https://73a2-129-208-125-202.ngrok-free.app/success"
 
 
 TIKTOK_CLIENT_ID = config("TIKTOK_CLIENT_ID")
 TIKTOK_CLIENT_SECRET = config("TIKTOK_CLIENT_SECRET")
 TIKTOK_BASE_URL = "https://www.tiktok.com/v2/"
 TIKTOK_API_URL = "https://open.tiktokapis.com/v2/"
-TIKTOK_REDIRECT_URL = "https://f688574a-ead3-4201-b99e-4014c033d966-00-2z4wkjz9c0pxn.kirk.replit.dev/oauth/callback/"
+TIKTOK_REDIRECT_URL = "https://73a2-129-208-125-202.ngrok-free.app/tiktok_success/"
+
+
+X_CONSUMER_ID = "tm27laQ6tFoNWXQMM4CUsEOjl"
+X_CONSUMER_SECRET = "eqOqhUq9tm66u8vx92ds4AQPG4JRAdyDUY0XWkkyBGt2AZ7I4f"

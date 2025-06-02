@@ -3,13 +3,154 @@ from rest_framework.views import APIView
 from rest_framework.decorators import api_view
 from rest_framework import status
 from rest_framework.response import Response
+from .utils import (
+    download_video_from_url,
+    create_linkedin_content_post,
+    create_linkedin_image_post,
+    start_uploading_on_tiktok,
+    start_posting_on_linkedin,
+)
 import requests
 import talkingagents.settings as settings
 import os
 import math
+import uuid
+import pandas as pd
+from threading import Thread
+import hmac
+import base64
+import hashlib
+from urllib.parse import quote, parse_qsl
+import time
 
 
 # Create your views here.
+
+
+class CreateCSVFromExcell(APIView):
+    def post(self, request):
+        excell_file = request.data.get("excell_file", None)
+        social_media_name = request.data.get("socialmedia_name", None)
+        if (
+            not excell_file
+            or not excell_file.name.lower().endswith("xlsx")
+            or not social_media_name
+        ):
+            return Response(
+                {
+                    "message": "No Excell File provided",
+                    "status": False,
+                    "status_code": 400,
+                    "response": None,
+                }
+            )
+        csv_filename = "tiktok.csv"
+        if social_media_name == "linkedin":
+            csv_filename = "linkedin.csv"
+        csv_path = os.path.join(settings.BASE_DIR, csv_filename)
+        try:
+            df = pd.read_excel(excell_file)
+            if social_media_name == "linekdin":
+                mandatory_cols = ["type", "content", "url"]
+                if not all(col in df.columns for col in mandatory_cols):
+                    return Response(
+                        {
+                            "message": f"Please Provide the as mandatory {mandatory_cols}",
+                            "status": False,
+                            "status_code": 400,
+                            "response": None,
+                        }
+                    )
+                df = df[mandatory_cols]
+                df.to_csv(csv_path, index=False)
+            else:
+                mandatory_cols = ["video_url"]
+                if not all(col in df.columns for col in mandatory_cols):
+                    return Response(
+                        {
+                            "message": f"Please Provide the as mandatory {mandatory_cols}",
+                            "status": False,
+                            "status_code": 400,
+                            "response": None,
+                        }
+                    )
+                df = df[mandatory_cols]
+                df.to_csv(csv_path, index=False)
+        except Exception as e:
+            print(f"Error converting Excel to CSV: {e}")
+            return None
+        return Response(
+            {
+                "message": "Csv Created Succesfilly",
+                "status": True,
+                "status_code": 200,
+                "response": None,
+            }
+        )
+
+
+class TwitterRequestTokenView(APIView):
+    def post(self, request):
+        url = "https://api.x.com/oauth/request_token"
+        callback = "https://73a2-129-208-125-202.ngrok-free.app/x_success"
+        consumer_key = settings.X_CONSUMER_ID
+        consumer_secret = settings.X_CONSUMER_SECRET
+
+        oauth_data = {
+            "oauth_callback": callback,
+            "oauth_consumer_key": consumer_key,
+            "oauth_nonce": uuid.uuid4().hex,
+            "oauth_signature_method": "HMAC-SHA1",
+            "oauth_timestamp": str(int(time.time())),
+            "oauth_version": "1.0",
+        }
+
+        # Generate signature
+        param_string = "&".join(
+            f"{quote(k)}={quote(v)}" for k, v in sorted(oauth_data.items())
+        )
+        base_string = "&".join(
+            [
+                "POST",
+                quote(url, safe=""),
+                quote(param_string, safe=""),
+            ]
+        )
+        signing_key = f"{quote(consumer_secret)}&"
+        signature = base64.b64encode(
+            hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
+        ).decode()
+        oauth_data["oauth_signature"] = signature
+
+        # Build Authorization header
+        auth_header = "OAuth " + ", ".join(
+            f'{k}="{quote(v)}"' for k, v in oauth_data.items()
+        )
+        headers = {
+            "Authorization": auth_header,
+            "User-Agent": "MyApp",
+        }
+
+        try:
+            res = requests.post(url, headers=headers)
+            res.raise_for_status()
+            data = dict(parse_qsl(res.text))
+            return Response(
+                {
+                    "message": "OAuth token received",
+                    "status": True,
+                    "token_data": data,
+                }
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "message": "Failed to get request token",
+                    "error": str(e),
+                    "status": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class VerifyLinkedInView(APIView):
@@ -51,12 +192,59 @@ class VerifyLinkedInView(APIView):
             )
         response_tokens = get_access_token.json()
         print(response_tokens.get("access_token"))
+        access_token = response_tokens.get("access_token")
+        if not access_token:
+            return Response(
+                {
+                    "message": "No Access Token Found",
+                    "status": False,
+                    "status_code": 400,
+                    "response": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+        }
+
+        user_info_response = requests.get(
+            f"{settings.LINKEDIN_API_URL}v2/userinfo", headers=headers
+        )
+
+        if user_info_response.status_code != 200:
+            print(user_info_response)
+            return Response(
+                {
+                    "message": "Failed to fetch user info from LinkedIn",
+                    "status": False,
+                    "status_code": user_info_response.status_code,
+                    "response": None,
+                },
+                status=user_info_response.status_code,
+            )
+        user_info = user_info_response.json()
+        urn = f"urn:li:person:{user_info.get('sub')}"
+        if not urn:
+            return Response(
+                {
+                    "message": "Person Profile info not found",
+                    "status": False,
+                    "status_code": 400,
+                    "response": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        posts_content_path = os.path.join(settings.BASE_DIR, "linkedin.csv")
+        Thread(
+            target=start_posting_on_linkedin,
+            args=(access_token, posts_content_path, urn),
+        ).start()
         return Response(
             {
-                "message": "Access Token Generated Successfully",
+                "message": "Successfully started posted on linkedin",
                 "status": True,
                 "status_code": 200,
-                "response": response_tokens.get("access_token"),
+                "response": None,
             },
             status=status.HTTP_200_OK,
         )
@@ -142,6 +330,164 @@ class CreatePostLinkedIn(APIView):
                 "response": post_response.json(),
             },
             status=post_response.status_code,
+        )
+
+
+class UploadImageToLinkedInView(APIView):
+    def post(self, request):
+        access_token = request.data.get("access_token")
+        post_content = request.data.get("content")
+        image_file = request.FILES.get("image")
+
+        if not access_token or not post_content or not image_file:
+            return Response(
+                {
+                    "message": "Access Token, Content, and Image are required",
+                    "status": False,
+                    "status_code": 400,
+                    "response": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Step 1: Save image locally
+        image_filename = f"{uuid.uuid4()}.jpg"
+        save_dir = os.path.join(settings.BASE_DIR, "LinkedIn_images")
+        os.makedirs(save_dir, exist_ok=True)
+        image_path = os.path.join(save_dir, image_filename)
+
+        with open(image_path, "wb+") as destination:
+            for chunk in image_file.chunks():
+                destination.write(chunk)
+
+        # Step 2: Get LinkedIn user info
+        user_info_url = f"{settings.LINKEDIN_API_URL}v2/userinfo"
+        user_headers = {
+            "Authorization": f"Bearer {access_token}",
+        }
+        user_info_response = requests.get(user_info_url, headers=user_headers)
+        if user_info_response.status_code != 200:
+            return Response(
+                {
+                    "message": "Failed to fetch user info from LinkedIn",
+                    "status": False,
+                    "status_code": user_info_response.status_code,
+                    "response": user_info_response.json(),
+                },
+                status=user_info_response.status_code,
+            )
+        user_info = user_info_response.json()
+        urn = f"urn:li:person:{user_info.get('sub')}"
+
+        # Step 3: Register image upload
+        register_upload_url = (
+            f"{settings.LINKEDIN_API_URL}v2/assets?action=registerUpload"
+        )
+        register_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        register_body = {
+            "registerUploadRequest": {
+                "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                "owner": urn,
+                "serviceRelationships": [
+                    {
+                        "relationshipType": "OWNER",
+                        "identifier": "urn:li:userGeneratedContent",
+                    }
+                ],
+            }
+        }
+
+        register_response = requests.post(
+            register_upload_url, headers=register_headers, json=register_body
+        )
+        if register_response.status_code not in [200, 201]:
+            return Response(
+                {
+                    "message": "Failed to register image upload",
+                    "status": False,
+                    "status_code": register_response.status_code,
+                    "response": register_response.json(),
+                },
+                status=register_response.status_code,
+            )
+
+        register_data = register_response.json()
+        upload_url = register_data["value"]["uploadMechanism"][
+            "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+        ]["uploadUrl"]
+        asset = register_data["value"]["asset"]
+
+        # Step 4: Upload image to LinkedIn
+        with open(image_path, "rb") as img_file:
+            upload_headers = {
+                "Authorization": f"Bearer {access_token}",
+            }
+            upload_response = requests.put(
+                upload_url, headers=upload_headers, data=img_file
+            )
+
+        if upload_response.status_code not in [200, 201]:
+            return Response(
+                {
+                    "message": "Failed to upload image",
+                    "status": False,
+                    "status_code": upload_response.status_code,
+                    "response": upload_response.text,
+                },
+                status=upload_response.status_code,
+            )
+
+        # Step 5: Create UGC Post with image
+        post_url = f"{settings.LINKEDIN_API_URL}v2/ugcPosts"
+        post_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "X-Restli-Protocol-Version": "2.0.0",
+            "Content-Type": "application/json",
+        }
+        post_body = {
+            "author": urn,
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": post_content},
+                    "shareMediaCategory": "IMAGE",
+                    "media": [
+                        {
+                            "status": "READY",
+                            "description": {"text": "Image post"},
+                            "media": asset,
+                            "title": {"text": "LinkedIn Image Post"},
+                        }
+                    ],
+                }
+            },
+            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+        }
+
+        final_post_response = requests.post(
+            post_url, headers=post_headers, json=post_body
+        )
+        if final_post_response.status_code in [200, 201]:
+            return Response(
+                {
+                    "message": "Image posted successfully on LinkedIn",
+                    "status": True,
+                    "status_code": 200,
+                    "response": final_post_response.json(),
+                },
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+            {
+                "message": "Failed to post image on LinkedIn",
+                "status": False,
+                "status_code": final_post_response.status_code,
+                "response": final_post_response.json(),
+            },
+            status=final_post_response.status_code,
         )
 
 
@@ -242,12 +588,26 @@ class VerifyTikTokView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         access_token = get_access_token.json().get("access_token")
+        if not access_token:
+            return Response(
+                {
+                    "message": "Access Token cannot be generated right now try again",
+                    "status": False,
+                    "status_code": 400,
+                    "response": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        posts_content_path = os.path.join(settings.BASE_DIR, "tiktok.csv")
+        Thread(
+            target=start_uploading_on_tiktok, args=(posts_content_path, access_token)
+        ).start()
         return Response(
             {
-                "message": "Access Token Generated Successfully",
+                "message": "Video Posting Started Successfullyy",
                 "status": True,
                 "status_code": 200,
-                "response": access_token,
+                "response": None,
             },
             status=status.HTTP_200_OK,
         )
@@ -256,14 +616,22 @@ class VerifyTikTokView(APIView):
 class UploadVideoTiktokView(APIView):
     def post(self, request):
         access_token = request.data.get("access_token", None)
-        video_path = request.data.get("video_path", None)
-        video_path = (
-            "/root/SA/TalkingAgents/talkingagents/855289-hd_1920_1080_25fps.mp4"
-        )
-        if not access_token or not video_path:
+        video_url = request.data.get("video_url", None)
+        if not access_token or not video_url:
             return Response(
                 {
                     "message": "Access Token and Video URL are required",
+                    "status": False,
+                    "status_code": 400,
+                    "response": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        video_path = download_video_from_url(video_url=video_url)
+        if not video_path:
+            return Response(
+                {
+                    "message": "Error Downloading the video",
                     "status": False,
                     "status_code": 400,
                     "response": None,
@@ -386,7 +754,7 @@ class UploadVideoTiktokView(APIView):
                     response_of_chunk_upload = requests.put(
                         url_for_video_upload,
                         headers=upload_video_headers,
-                        data=f,
+                        data=chunk_data,
                         timeout=(10, 480),
                     )
                     if response_of_chunk_upload.status_code not in [200, 201]:
@@ -410,7 +778,7 @@ class UploadVideoTiktokView(APIView):
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-
+        os.remove(video_path)
         return Response(
             {
                 "message": "Video Posted. Please check your tiktok after a minute",
